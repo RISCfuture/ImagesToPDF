@@ -1,5 +1,5 @@
-import Foundation
 import ArgumentParser
+import Foundation
 
 @main
 struct ImagesToPDF: AsyncParsableCommand {
@@ -9,63 +9,63 @@ struct ImagesToPDF: AsyncParsableCommand {
             This command-line tool was originally intended to be used with the instrument
             procedure plates that come with Falcon BMS campaign documentation, but can
             easily be used with any collection of images.
-            
+
             The generated Table of Contents is saved as a PDF outline, and will appear using
             any PDF viewer’s Outline feature.
             """
     )
-    
+
+    private static var letterSize: CGSize {
+        let (w, h) = PAPER_SIZES["letter"]!
+        return .init(width: w, height: h)
+    }
+
     @Argument(
         help: "The input directory containing the image files.",
         completion: .directory,
         transform: { URL(filePath: $0, directoryHint: .isDirectory) })
     var input: URL = .currentDirectory()
-    
+
     @Argument(
         help: "The PDF file to generate.",
         completion: .file(extensions: ["pdf]"]),
         transform: { URL(filePath: $0, directoryHint: .notDirectory) }
     )
     var output: URL
-    
+
     @Option(
         name: .shortAndLong,
         help: "The title of the Table of Contents for the generated PDF. (default: file name)")
-    var title: String? = nil
-    
+    var title: String?
+
     @Option(
         name: [.customShort("s"), .customLong("size")],
         help: "The page size of the resulting PDF. Can be a name (e.g. ‘a2’) or a width and height in points (e.g. ‘1191x1684’). (default: letter)",
         transform: { Self.size(from: $0) })
-    var pageSize: CGSize? = nil
-    
-    private static var letterSize: CGSize {
-        let (w, h) = PAPER_SIZES["letter"]!
-        return .init(width: w, height: h)
-    }
-    
-    mutating func run() async throws {
-        let title = self.title ?? input.deletingPathExtension().lastPathComponent
-        let size = self.pageSize ?? Self.letterSize
-        
-        let generator = PDFGenerator(input: input, title: title, pageSize: size)
-        try await generator.generate(to: output)
-    }
-    
+    var pageSize: CGSize?
+
     private static func size(from name: String) -> CGSize? {
         if let (w, h) = PAPER_SIZES[name.lowercased()] {
             return .init(width: w, height: h)
         }
-        
+
         let parts = name.split(separator: "x")
         guard parts.count == 2 else { return nil }
         guard let w = Int(parts[0]), let h = Int(parts[1]) else { return nil }
-        
+
         return .init(width: w, height: h)
+    }
+
+    mutating func run() async throws {
+        let title = self.title ?? input.deletingPathExtension().lastPathComponent
+        let size = self.pageSize ?? Self.letterSize
+
+        let generator = PDFGenerator(input: input, title: title, pageSize: size)
+        try await generator.generate(to: output)
     }
 }
 
-fileprivate let PAPER_SIZES = [
+private let PAPER_SIZES = [
     "a2": (1191, 1684),
     "a5": (420, 595),
     "a4": (595, 842),
@@ -107,6 +107,5 @@ fileprivate let PAPER_SIZES = [
     "ansi-a": (612, 791),
     "ansi-b": (791, 1225),
     "ansi-e": (2449, 3169),
-    "ansi-d": (1585, 2449),
+    "ansi-d": (1585, 2449)
 ]
-
