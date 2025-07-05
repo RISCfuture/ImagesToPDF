@@ -2,6 +2,28 @@ import Foundation
 import Logging
 @preconcurrency import PDFKit
 
+private func loadPDFPages(from fileURL: URL, parentPath: String, pageSize _: CGSize) -> [PDFGenerator.PDFItem] {
+    let logger = Logger(label: "codes.tim.ImagesToPDF.PDFGenerator")
+    guard let pdfDocument = PDFDocument(url: fileURL) else {
+        logger.info("Skipping PDF: couldn't create PDFDocument", metadata: [
+            "fileURL": "\(fileURL)"
+        ])
+        return []
+    }
+
+    let relativePath = fileURL.deletingPathExtension().path(relativeTo: parentPath)!
+    var results: [PDFGenerator.PDFItem] = []
+
+    for pageIndex in 0..<pdfDocument.pageCount {
+        guard let page = pdfDocument.page(at: pageIndex) else { continue }
+
+        let pagePath = pageIndex == 0 ? relativePath : "\(relativePath)/Page \(pageIndex + 1)"
+        results.append(.pdfPage(page: page, path: pagePath))
+    }
+
+    return results
+}
+
 class PDFGenerator {
     private static let logger = Logger(label: "codes.tim.ImagesToPDF.PDFGenerator")
 
@@ -9,7 +31,7 @@ class PDFGenerator {
     private let title: String
     private let pageSize: CGSize
 
-    var allowedSuffixes = [".png", ".jpg", ".jpeg", ".gif", ".bmp"]
+    var allowedSuffixes = [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".pdf"]
 
     private var pageRect: CGRect { .init(origin: .zero, size: pageSize) }
 
@@ -25,15 +47,16 @@ class PDFGenerator {
         guard pdf.write(to: output) else { throw Errors.couldntWritePDF(url: output) }
     }
 
-    private func loadImages() async throws -> [PDFImage] {
+    private func loadImages() async throws -> [PDFItem] {
         let allowedSuffixes = self.allowedSuffixes,
-            parentPath = self.input.path(percentEncoded: false)
+            parentPath = self.input.path(percentEncoded: false),
+            pageSize = self.pageSize
 
-        return try await withThrowingTaskGroup(of: PDFImage?.self) { group in
+        return try await withThrowingTaskGroup(of: [PDFItem].self) { group in
             let enumerator = FileManager.default.enumerator(at: input, includingPropertiesForKeys: [.isRegularFileKey, .nameKey, .pathKey], options: [.skipsHiddenFiles, .skipsPackageDescendants])!
             let allURLs = enumerator.compactMap { $0 as? URL }
             for fileURL in allURLs {
-                group.addTask { () -> PDFImage? in
+                group.addTask { () -> [PDFItem] in
                     guard let resourceValues = try? fileURL.resourceValues(forKeys: [.isRegularFileKey, .nameKey, .pathKey]),
                           let isRegularFile = resourceValues.isRegularFile,
                           let name = resourceValues.name,
@@ -41,53 +64,63 @@ class PDFGenerator {
                         Self.logger.info("Skipping file: couldn’t load resource values", metadata: [
                             "fileURL": "\(fileURL)"
                         ])
-                        return nil
+                        return []
                     }
-                    guard isRegularFile else { return nil }
+                    guard isRegularFile else { return [] }
                     guard allowedSuffixes.contains(where: { name.hasSuffix($0) }) else {
-                        Self.logger.info("Skipping file: not an image file", metadata: [
+                        Self.logger.info("Skipping file: not an image or PDF file", metadata: [
                             "path": "\(path)"
                         ])
-                        return nil
+                        return []
+                    }
+
+                    if name.hasSuffix(".pdf") {
+                        return loadPDFPages(from: fileURL, parentPath: parentPath, pageSize: pageSize)
                     }
 
                     guard let nsImage = NSImage(contentsOfFile: path) else {
                         Self.logger.info("Skipping file: couldn’t create NSImage", metadata: [
                             "fileURL": "\(fileURL)"
                         ])
-                        return nil
+                        return []
                     }
                     var imageRect = CGRect(origin: .zero, size: nsImage.size)
                     guard let cgImage = nsImage.cgImage(forProposedRect: &imageRect, context: nil, hints: nil) else {
                         Self.logger.info("Skipping file: couldn’t create CGImage", metadata: [
                             "fileURL": "\(fileURL)"
                         ])
-                        return nil
+                        return []
                     }
                     let relativePath = fileURL.deletingPathExtension().path(relativeTo: parentPath)!
-                    return .init(image: cgImage, path: relativePath, size: imageRect.size)
+                    return [.image(image: cgImage, path: relativePath, size: imageRect.size)]
                 }
             }
 
-            var array = [PDFImage]()
-            for try await image in group {
-                guard let image else { continue }
-                array.append(image)
+            var array = [PDFItem]()
+            for try await images in group {
+                array.append(contentsOf: images)
             }
             return array.sorted(by: { $0.path < $1.path })
         }
     }
 
-    private func generatePDF(images: [PDFImage], pageSize: CGSize) async -> PDFDocument {
+    private func generatePDF(images: [PDFItem], pageSize: CGSize) async -> PDFDocument {
         await withTaskGroup(of: (page: PDFPage?, index: Int).self) { group in
             let document = PDFDocument()
 
-            for (index, image) in images.enumerated() {
+            for (index, item) in images.enumerated() {
                 group.addTask {
-                    let page = PDFPage(image: NSImage(cgImage: image.image, size: image.size),
-                                       options: [.compressionQuality: 0.9,
-                                                 .mediaBox: CGRect(origin: .zero, size: pageSize),
-                                                 .upscaleIfSmaller: true])
+                    let page: PDFPage?
+
+                    switch item {
+                        case let .image(cgImage, _, size):
+                            page = PDFPage(image: NSImage(cgImage: cgImage, size: size),
+                                           options: [.compressionQuality: 0.9,
+                                                     .mediaBox: CGRect(origin: .zero, size: pageSize),
+                                                     .upscaleIfSmaller: true])
+                        case let .pdfPage(pdfPage, _):
+                            page = pdfPage
+                    }
 
                     return (page: page, index: index)
                 }
@@ -109,7 +142,7 @@ class PDFGenerator {
         }
     }
 
-    private func buildTOC(documentTitle: String, images: [PDFImage]) async -> TOCNode {
+    private func buildTOC(documentTitle: String, images: [PDFItem]) async -> TOCNode {
         let root = TOCNode(title: documentTitle)
         for image in images {
             var titlePath = image.path.split(separator: "/").map { String($0) }
@@ -118,13 +151,33 @@ class PDFGenerator {
         return root
     }
 
-    private struct PDFImage: Sendable, Equatable, Hashable {
-        let image: CGImage
-        let path: String
-        let size: NSSize
+    enum PDFItem: @unchecked Sendable, Equatable, Hashable {
+        case image(image: CGImage, path: String, size: NSSize)
+        case pdfPage(page: PDFPage, path: String)
 
-        var nsImage: NSImage {
-            .init(cgImage: image, size: size)
+        var path: String {
+            switch self {
+            case let .image(_, path, _), let .pdfPage(_, path):
+                return path
+            }
+        }
+
+        var nsImage: NSImage? {
+            switch self {
+            case let .image(image, _, size):
+                return .init(cgImage: image, size: size)
+            case .pdfPage:
+                return nil
+            }
+        }
+
+        var pdfPage: PDFPage? {
+            switch self {
+            case .image:
+                return nil
+            case let .pdfPage(page, _):
+                return page
+            }
         }
 
         static func == (lhs: Self, rhs: Self) -> Bool {
