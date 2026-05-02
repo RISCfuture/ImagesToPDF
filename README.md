@@ -1,5 +1,9 @@
 # ImagesToPDF
 
+[![CI](https://github.com/RISCfuture/ImagesToPDF/actions/workflows/swift.yaml/badge.svg)](https://github.com/RISCfuture/ImagesToPDF/actions/workflows/swift.yaml)
+
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Converts a nested directory structure of images to a PDF file with Table of
 Contents.
 
