@@ -55,8 +55,6 @@ class PDFGenerator {
   /// File extensions that will be included in the generated PDF.
   var allowedSuffixes = [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".pdf"]
 
-  private var pageRect: CGRect { .init(origin: .zero, size: pageSize) }
-
   /// Creates a new PDF generator.
   /// - Parameters:
   ///   - input: The directory containing images and PDFs to combine.

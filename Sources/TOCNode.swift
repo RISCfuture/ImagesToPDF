@@ -6,21 +6,6 @@ final actor TOCNode: Equatable {
   var page: PDFPage?
 
   var children: [TOCNode] = []
-  private weak var parent: TOCNode?
-
-  var level: Int {
-    get async {
-      guard let parent else { return 0 }
-      return await parent.level + 1
-    }
-  }
-
-  var index: Int? {
-    get async {
-      guard let parent else { return nil }
-      return await parent.children.firstIndex(of: self)
-    }
-  }
 
   var outline: PDFOutline? {
     get async {
@@ -39,9 +24,8 @@ final actor TOCNode: Equatable {
     }
   }
 
-  init(title: String, parent: TOCNode? = nil) {
+  init(title: String) {
     self.title = title
-    self.parent = parent
   }
 
   static func == (lhs: TOCNode, rhs: TOCNode) -> Bool {
@@ -68,7 +52,7 @@ final actor TOCNode: Equatable {
     if let existing = children.first(where: { $0.title == nextTitle }) {
       nextNode = existing
     } else {
-      let newNode = TOCNode(title: nextTitle, parent: self)
+      let newNode = TOCNode(title: nextTitle)
       children.append(newNode)
       nextNode = newNode
     }

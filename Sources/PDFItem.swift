@@ -12,24 +12,6 @@ enum PDFItem: @unchecked Sendable, Equatable, Hashable {
     }
   }
 
-  var nsImage: NSImage? {
-    switch self {
-      case let .image(image, _, size):
-        return .init(cgImage: image, size: size)
-      case .pdfPage:
-        return nil
-    }
-  }
-
-  var pdfPage: PDFPage? {
-    switch self {
-      case .image:
-        return nil
-      case let .pdfPage(page, _):
-        return page
-    }
-  }
-
   static func == (lhs: Self, rhs: Self) -> Bool {
     lhs.path == rhs.path
   }
