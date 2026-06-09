@@ -21,7 +21,7 @@ This tool was built using Swift 6 and requires macOS 14 or newer. Run
 
 ## Usage
 
-```
+```text
 USAGE: images-to-pdf [<input>] <output> [--title <title>] [--size <size>]
 
 ARGUMENTS:
