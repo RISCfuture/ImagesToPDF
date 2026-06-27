@@ -2,6 +2,11 @@
 
 import PackageDescription
 
+let approachableConcurrency: [SwiftSetting] = [
+  .enableUpcomingFeature("NonisolatedNonsendingByDefault"),
+  .enableUpcomingFeature("InferIsolatedConformances")
+]
+
 let package = Package(
   name: "ImagesToPDF",
   defaultLocalization: "en",
@@ -16,7 +21,8 @@ let package = Package(
       dependencies: [
         .product(name: "ArgumentParser", package: "swift-argument-parser"),
         .product(name: "Logging", package: "swift-log")
-      ]
+      ],
+      swiftSettings: approachableConcurrency
     )
   ],
   swiftLanguageModes: [.v6]

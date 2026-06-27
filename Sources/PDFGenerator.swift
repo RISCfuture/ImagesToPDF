@@ -1,14 +1,12 @@
 import Foundation
 import Logging
-@preconcurrency import PDFKit
+import PDFKit
 
-// Mark PDFKit types as Sendable for Swift 6 concurrency
-// These are safe in this context as we control all access patterns
-extension PDFOutline: @retroactive @unchecked Sendable {}
-extension PDFPage: @retroactive @unchecked Sendable {}
-
-private func loadPDFPages(from fileURL: URL, parentPath: String, logger: Logger) -> [PDFItem] {
-  guard let pdfDocument = PDFDocument(url: fileURL) else {
+// Reads an existing PDF's page layout into Sendable descriptors without materializing pages;
+// the pages themselves are built later during assembly.
+@PDFActor
+private func pdfPages(from fileURL: URL, parentPath: String, logger: Logger) -> [PDFItem] {
+  guard let document = PDFDocument(url: fileURL) else {
     logger.info(
       "Skipping PDF: couldn't create PDFDocument",
       metadata: [
@@ -28,16 +26,11 @@ private func loadPDFPages(from fileURL: URL, parentPath: String, logger: Logger)
     )
     return []
   }
-  var results: [PDFItem] = []
 
-  for pageIndex in 0..<pdfDocument.pageCount {
-    guard let page = pdfDocument.page(at: pageIndex) else { continue }
-
+  return (0..<document.pageCount).map { pageIndex in
     let pagePath = pageIndex == 0 ? relativePath : "\(relativePath)/Page \(pageIndex + 1)"
-    results.append(.pdfPage(page: page, path: pagePath))
+    return .pdfPage(sourceURL: fileURL, pageIndex: pageIndex, path: pagePath)
   }
-
-  return results
 }
 
 /// Generates PDF documents from a directory of images and existing PDFs.
@@ -47,6 +40,7 @@ private func loadPDFPages(from fileURL: URL, parentPath: String, logger: Logger)
 /// on the directory structure.
 class PDFGenerator {
   private static let logger = Logger(label: "codes.tim.ImagesToPDF.PDFGenerator")
+  private static let imageCompressionQuality = 0.9
 
   private let input: URL
   private let title: String
@@ -72,8 +66,7 @@ class PDFGenerator {
   ///           or `Errors.couldntWritePDF` if writing fails.
   func generate(to output: URL) async throws {
     let images = try await loadImages()
-    let pdf = await generatePDF(images: images, pageSize: pageSize)
-    guard pdf.write(to: output) else { throw Errors.couldntWritePDF(url: output) }
+    try await writePDF(images: images, to: output)
   }
 
   private func loadImages() async throws -> [PDFItem] {
@@ -121,7 +114,7 @@ class PDFGenerator {
           }
 
           if name.hasSuffix(".pdf") {
-            return loadPDFPages(from: fileURL, parentPath: parentPath, logger: Self.logger)
+            return await pdfPages(from: fileURL, parentPath: parentPath, logger: Self.logger)
           }
 
           guard let nsImage = NSImage(contentsOfFile: path) else {
@@ -167,66 +160,63 @@ class PDFGenerator {
     }
   }
 
-  private func generatePDF(images: [PDFItem], pageSize: CGSize) async -> PDFDocument {
-    await withTaskGroup(of: PageResult.self) { group in
-      let document = PDFDocument()
+  @PDFActor
+  private func writePDF(images: [PDFItem], to output: URL) throws {
+    let document = assembleDocument(from: images)
+    guard document.write(to: output) else { throw Errors.couldntWritePDF(url: output) }
+  }
 
-      for (index, item) in images.enumerated() {
-        group.addTask {
-          let page: PDFPage?
+  @PDFActor
+  private func assembleDocument(from images: [PDFItem]) -> PDFDocument {
+    let document = PDFDocument()
+    let tocRoot = buildTOC(documentTitle: title, images: images)
+    var sourceDocuments: [URL: PDFDocument] = [:]
+    var insertionIndex = 0
 
-          switch item {
-            case let .image(cgImage, _, size):
-              page = PDFPage(
-                image: NSImage(cgImage: cgImage, size: size),
-                options: [
-                  .compressionQuality: 0.9,
-                  .mediaBox: CGRect(origin: .zero, size: pageSize),
-                  .upscaleIfSmaller: true
-                ]
-              )
-            case let .pdfPage(pdfPage, _):
-              page = pdfPage
-          }
+    for item in images {
+      guard let page = page(for: item, sourceDocuments: &sourceDocuments) else { continue }
+      document.insert(page, at: insertionIndex)
+      insertionIndex += 1
+      var titlePath = item.path.split(separator: "/").map(String.init)
+      tocRoot.setPage(page, for: &titlePath)
+    }
 
-          return PageResult(page: page, index: index)
-        }
-      }
+    document.outlineRoot = tocRoot.outline
+    return document
+  }
 
-      var pages: [PageResult] = []
-      for await result in group {
-        guard result.page != nil else { continue }
-        pages.append(result)
-      }
-      pages.sort { $0.index < $1.index }
-
-      let tocRoot = await buildTOC(documentTitle: title, images: images)
-      for (index, pageResult) in pages.enumerated() {
-        guard let page = pageResult.page else { continue }
-        document.insert(page, at: index)
-        var titlePath = images[pageResult.index].path.split(separator: "/").map { String($0) }
-        await tocRoot.setPage(page, for: &titlePath)
-      }
-
-      document.outlineRoot = await tocRoot.outline
-      return document
+  @PDFActor
+  private func page(for item: PDFItem, sourceDocuments: inout [URL: PDFDocument]) -> PDFPage? {
+    switch item {
+      case let .image(cgImage, _, size):
+        return PDFPage(
+          image: NSImage(cgImage: cgImage, size: size),
+          options: [
+            .compressionQuality: Self.imageCompressionQuality,
+            .mediaBox: CGRect(origin: .zero, size: pageSize),
+            .upscaleIfSmaller: true
+          ]
+        )
+      case let .pdfPage(sourceURL, pageIndex, _):
+        return sourceDocument(at: sourceURL, cache: &sourceDocuments)?.page(at: pageIndex)
     }
   }
 
-  private func buildTOC(documentTitle: String, images: [PDFItem]) async -> TOCNode {
+  @PDFActor
+  private func sourceDocument(at url: URL, cache: inout [URL: PDFDocument]) -> PDFDocument? {
+    if let cached = cache[url] { return cached }
+    guard let document = PDFDocument(url: url) else { return nil }
+    cache[url] = document
+    return document
+  }
+
+  @PDFActor
+  private func buildTOC(documentTitle: String, images: [PDFItem]) -> TOCNode {
     let root = TOCNode(title: documentTitle)
     for image in images {
-      var titlePath = image.path.split(separator: "/").map { String($0) }
-      await root.addChildren(titlePath: &titlePath)
+      var titlePath = image.path.split(separator: "/").map(String.init)
+      root.addChildren(titlePath: &titlePath)
     }
     return root
-  }
-
-  // MARK: - Private Types
-
-  /// Wrapper to safely pass PDFPage across concurrency boundaries.
-  private struct PageResult: @unchecked Sendable {
-    let page: PDFPage?
-    let index: Int
   }
 }
