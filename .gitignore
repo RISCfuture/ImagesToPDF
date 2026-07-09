@@ -10,9 +10,7 @@ xcuserdata/
 .swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
 /Packages
 
-# Credentials
-.netrc
-
 # SwiftLint / swift-format
 .swiftlint/RemoteConfigCache
 .swift-format
+.claude/settings.local.json
