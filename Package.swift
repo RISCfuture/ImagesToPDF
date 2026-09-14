@@ -1,4 +1,4 @@
-// swift-tools-version: 6.3
+// swift-tools-version: 6.4
 
 import PackageDescription
 
@@ -14,7 +14,7 @@ let upcomingFeatures: [SwiftSetting] = [
 let package = Package(
   name: "ImagesToPDF",
   defaultLocalization: "en",
-  platforms: [.macOS(.v13)],
+  platforms: [.macOS(.v27)],
   dependencies: [
     .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.8.2"),
     .package(url: "https://github.com/apple/swift-log.git", from: "1.15.0"),
