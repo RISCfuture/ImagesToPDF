@@ -17,7 +17,7 @@ extension URL {
 extension String {
   fileprivate var realPath: String? {
     var resolved = [CChar](repeating: 0, count: Int(PATH_MAX))
-    guard realpath(self, &resolved) != nil else { return nil }
+    guard unsafe realpath(self, &resolved) != nil else { return nil }
     // Find null terminator and convert to String using failable initializer
     let length = resolved.firstIndex(of: 0) ?? resolved.count
     let bytes = resolved[0..<length].map { UInt8(bitPattern: $0) }

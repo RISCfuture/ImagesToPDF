@@ -127,7 +127,12 @@ class PDFGenerator {
             return []
           }
           var imageRect = CGRect(origin: .zero, size: nsImage.size)
-          guard let cgImage = nsImage.cgImage(forProposedRect: &imageRect, context: nil, hints: nil)
+          guard
+            let cgImage = unsafe nsImage.cgImage(
+              forProposedRect: &imageRect,
+              context: nil,
+              hints: nil
+            )
           else {
             Self.logger.info(
               "Skipping file: couldn't create CGImage",
