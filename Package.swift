@@ -18,7 +18,7 @@ let package = Package(
   platforms: [.macOS(.v27)],
   dependencies: [
     .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.8.2"),
-    .package(url: "https://github.com/apple/swift-log.git", from: "1.15.0"),
+    .package(url: "https://github.com/apple/swift-log.git", from: "1.16.2"),
     .package(url: "https://github.com/apple/swift-docc-plugin", from: "1.5.0")
   ],
   targets: [
